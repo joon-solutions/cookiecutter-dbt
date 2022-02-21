@@ -1,0 +1,33 @@
+# Dbt profiles.yml for local development
+
+{{ cookiecutter.project_slug }}:
+  target: dev
+  outputs:
+
+{%- if cookiecutter.adapter == 'bigquery' %}
+    dev:
+      type: bigquery
+      method: service-account
+      project: your-bigquery-project
+      dataset: your-dataset
+      location: {{ cookiecutter.location }}
+      keyfile: service_account-dev.json
+      threads: 32
+      timeout_second: 300
+      priority: interactive
+
+{%- elif cookiecutter.adapter == 'snowflake' %}
+    dev:
+      type: snowflake
+      account: your-snowflake-account
+      user: your-username
+      password: your-password
+      role: your-snowflake-role
+      warehouse: your-snowflake-warehouse
+      database: your-snowflake-database
+      schema: your-snowflake-schema
+
+      client_session_keep_alive: False
+      threads: 8
+
+{%- endif %}

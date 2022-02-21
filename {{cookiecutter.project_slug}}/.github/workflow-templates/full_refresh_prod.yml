@@ -1,0 +1,98 @@
+# Template for Github Action workflow full_refresh_prod
+#
+# Schedule:
+#   - Per 6 hours, or
+#   - Manually trigger
+#
+# Workflow tasks:
+#   - Seed data
+#   - Run all models
+#   - Test all models
+#
+# Usage:
+#   - Set Github Secrets:
+{%- if cookiecutter.adapter == 'bigquery' %}
+#     - DBT_BIGQUERY_PROJECT_PROD: JSON key of Google service account (prod)
+#     - DBT_BIGQUERY_DATASET_PROD: BigQuery project (prod)
+{%- elif cookiecutter.adapter == 'snowflake' %}
+#     - DBT_SNOWFLAKE_ACCOUNT: Snowflake account
+#     - DBT_SNOWFLAKE_USER: Snowflake user
+#     - DBT_SNOWFLAKE_PASSWORD: Snowflake password
+#     - DBT_SNOWFLAKE_ROLE: Snowflake role for dbt
+#     - DBT_SNOWFLAKE_WAREHOUSE: Snowflake warehouse for dbt
+#     - DBT_SNOWFLAKE_DATABASE_PROD: Snowflake database (prod)
+#     - DBT_SNOWFLAKE_SCHEMA_PROD: Snowflake schema (prod)
+{%- endif %}
+
+name: full_refresh_prod
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+concurrency: prod
+
+env:
+  DBT_PROFILES_DIR: ./
+
+{%- if cookiecutter.adapter == "bigquery" %}
+  # Environment variables for running Dbt on BigQuery
+  DBT_BIGQUERY_PROJECT_PROD: {% raw %}{{ secrets.DBT_BIGQUERY_PROJECT_PROD }}{% endraw %}
+  DBT_BIGQUERY_DATASET_PROD: {% raw %}{{ secrets.DBT_BIGQUERY_DATASET_PROD }}{% endraw %}
+  # DBT_BIGQUERY_LOCATION: {{ cookiecutter.location }}
+{%- elif cookiecutter.adapter == "snowflake" %}
+  # Environment variables for running Dbt on Snowflake
+  DBT_SNOWFLAKE_ACCOUNT: {% raw %}{{ env_var("DBT_SNOWFLAKE_ACCOUNT") }}{% endraw %}
+  DBT_SNOWFLAKE_USER: {% raw %}{{ env_var("DBT_SNOWFLAKE_USER") }}{% endraw %}
+  DBT_SNOWFLAKE_PASSWORD: {% raw %}{{ env_var('DBT_SNOWFLAKE_PASSWORD') }}{% endraw %}
+  DBT_SNOWFLAKE_ROLE: {% raw %}{{ env_var("DBT_SNOWFLAKE_ROLE") }}{% endraw %}
+  DBT_SNOWFLAKE_WAREHOUSE: {% raw %}{{ env_var("DBT_SNOWFLAKE_WAREHOUSE") }}{% endraw %}
+  DBT_SNOWFLAKE_DATABASE_PROD: {% raw %}{{ env_var("DBT_SNOWFLAKE_DATABASE_PROD") }}{% endraw %}
+  DBT_SNOWFLAKE_SCHEMA_PROD: {% raw %}{{ env_var("DBT_SNOWFLAKE_SCHEMA_PROD") }}{% endraw %}
+{%- endif %}
+
+jobs:
+  full_refresh_prod:
+    name: full_refresh_prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+
+      - uses: actions/setup-python@v1
+        with:
+          python-version: "3.7.x"
+
+{%- if cookiecutter.adapter == "bigquery" %}
+      # Dbt - Google BigQuery      
+      - name: Create Google Service Account key file from secret
+        run: 'echo "$KEYFILE" | base64 -d > service_account-prod.json'
+        shell: bash
+        env:
+          KEYFILE: {% raw %}"${{ secrets.BIGQUERY_SA_KEYFILE_PROD }}"{% endraw %}
+{%- endif %}
+
+
+      ## Cache Pip wheel files
+      - name: Cache Pip
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: {% raw %}"${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}"{% endraw %}
+
+      - name: Install dependencies
+        run: |
+          pip3 install -r requirements.txt
+          dbt deps --target prod
+
+      - name: Dbt seed
+        run: dbt seed --target prod
+
+      - name: Run all models
+        run: dbt run --target prod
+      
+      - name: Test all models
+        run: dbt test --target prod

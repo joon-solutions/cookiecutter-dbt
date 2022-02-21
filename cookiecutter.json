@@ -1,0 +1,9 @@
+{
+    "project_name": "example",
+    "project_slug": "{{ (cookiecutter.project_name.lower() + '-dbt') |replace(' ', '_')|replace('-', '_')|replace('.', '_')|trim() }}",
+    "adapter": [
+        "snowflake",
+        "bigquery"
+    ],
+    "location": "US"
+}

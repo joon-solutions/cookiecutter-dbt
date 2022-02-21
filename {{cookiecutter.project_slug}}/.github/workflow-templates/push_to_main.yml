@@ -1,0 +1,164 @@
+# Template for Github Action workflow push_to_main
+#
+# Workflow tasks:
+#   - Seed data
+#   - Run delta models
+#   - Test delta models
+#
+# Usage:
+#   - Set Github Secrets:
+{%- if cookiecutter.adapter == 'bigquery' %}
+#     - DBT_BIGQUERY_KEYFILE_DEV: JSON key of Google service account (dev)
+#     - DBT_BIGQUERY_PROJECT_DEV: BigQuery project (dev)
+#     - DBT_BIGQUERY_PROJECT_PROD: JSON key of Google service account (prod)
+#     - DBT_BIGQUERY_DATASET_PROD: BigQuery project (prod)
+{%- elif cookiecutter.adapter == 'snowflake' %}
+#     - DBT_SNOWFLAKE_ACCOUNT: Snowflake account
+#     - DBT_SNOWFLAKE_USER: Snowflake user
+#     - DBT_SNOWFLAKE_PASSWORD: Snowflake password
+#     - DBT_SNOWFLAKE_ROLE: Snowflake role for dbt
+#     - DBT_SNOWFLAKE_WAREHOUSE: Snowflake warehouse for dbt
+#     - DBT_SNOWFLAKE_DATABASE_DEV: Snowflake database (dev)
+#     - DBT_SNOWFLAKE_SCHEMA_DEV: Snowflake schema (dev)
+#     - DBT_SNOWFLAKE_DATABASE_PROD: Snowflake database (prod)
+#     - DBT_SNOWFLAKE_SCHEMA_PROD: Snowflake schema (prod)
+{%- endif %}
+
+name: push_to_main
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency: prod
+
+env:
+  ARTIFACT_DBT_MANIFEST_NAME_PROD: dbt_manifest
+  ARTIFACT_DBT_MANIFEST_NAME_DEV: dbt_manifest_dev
+
+  DBT_PROFILES_DIR: ./
+
+{%- if cookiecutter.adapter == "bigquery" %}
+  # Environment variables for running Dbt on BigQuery
+  DBT_BIGQUERY_PROJECT_DEV: {% raw %}{{ secrets.DBT_BIGQUERY_PROJECT_DEV }}{% endraw %}
+  DBT_BIGQUERY_DATASET_DEV: github_action
+
+  DBT_BIGQUERY_PROJECT_PROD: {% raw %}{{ secrets.DBT_BIGQUERY_PROJECT_PROD }}{% endraw %}
+  DBT_BIGQUERY_DATASET_PROD: {% raw %}{{ secrets.DBT_BIGQUERY_DATASET_PROD }}{% endraw %}
+  # DBT_BIGQUERY_LOCATION: {{ cookiecutter.location }}
+{%- elif cookiecutter.adapter == "snowflake" %}
+  # Environment variables for running Dbt on Snowflake
+  DBT_SNOWFLAKE_ACCOUNT: {% raw %}{{ env_var("DBT_SNOWFLAKE_ACCOUNT") }}{% endraw %}
+  DBT_SNOWFLAKE_USER: {% raw %}{{ env_var("DBT_SNOWFLAKE_USER") }}{% endraw %}
+  DBT_SNOWFLAKE_PASSWORD: {% raw %}{{ env_var('DBT_SNOWFLAKE_PASSWORD') }}{% endraw %}
+  DBT_SNOWFLAKE_ROLE: {% raw %}{{ env_var("DBT_SNOWFLAKE_ROLE") }}{% endraw %}
+  DBT_SNOWFLAKE_WAREHOUSE: {% raw %}{{ env_var("DBT_SNOWFLAKE_WAREHOUSE") }}{% endraw %}
+  DBT_SNOWFLAKE_DATABASE_DEV: {% raw %}{{ env_var("DBT_SNOWFLAKE_DATABASE_DEV") }}{% endraw %}
+  DBT_SNOWFLAKE_SCHEMA_DEV: github_action
+
+  DBT_SNOWFLAKE_DATABASE_PROD: {% raw %}{{ env_var("DBT_SNOWFLAKE_DATABASE_PROD") }}{% endraw %}
+  DBT_SNOWFLAKE_SCHEMA_PROD: {% raw %}{{ env_var("DBT_SNOWFLAKE_SCHEMA_PROD") }}{% endraw %}
+{%- endif %}
+
+jobs:
+  push_to_main:
+    name: push_to_main
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v2
+
+      - uses: actions/setup-python@v1
+        with:
+          python-version: "3.7.x"
+
+{%- if cookiecutter.adapter == "bigquery" %}
+      # Dbt - Google BigQuery      
+      - name: Create Google Service Account key file from secret
+        run: 'echo "$KEYFILE" | base64 -d > service_account-prod.json'
+        shell: bash
+        env:
+          KEYFILE: {% raw %}"${{ secrets.BIGQUERY_SA_KEYFILE_PROD }}"{% endraw %}
+{%- endif %}
+
+      ## Cache Pip wheel files
+      - name: Cache Pip
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: {% raw %}"${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}"{% endraw %}
+
+      - name: Install dependencies
+        run: |
+          pip3 install -r requirements.txt
+          dbt deps --target prod
+
+      ## Download dbt manifest uploaded in another workflow (default: push_to_main.yml).
+      # This manifest file will be used to filter out delta models.
+      - name: Download dbt manifest
+        id: download_dbt_manifest
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: {% raw %}"${{ github.workflow }}.yml"{% endraw %}
+          workflow_conclusion: success
+          branch: main
+          name: {% raw %}"${{ env.ARTIFACT_DBT_MANIFEST_NAME_PROD }}"{% endraw %}
+          path: .
+          check_artifacts:  false
+        continue-on-error: true
+
+      - name: Dbt seed
+        run: dbt seed --target prod
+
+      ## In some case, manifest file artifact cannot be downloaded.
+      # Then, compile current code to create a new manifest file.
+      # Note, because previous dbt state is missing, all models will be
+      # run and tested.
+      - name: Run all models
+        if: steps.download_dbt_manifest.outcome != 'success'
+        run: dbt run --target prod
+      
+      - name: Test all models
+        if: steps.download_dbt_manifest.outcome != 'success'
+        run: dbt test --target prod
+
+      ## If manifest file is available:
+      # Run delta models
+      - name: Run delta models
+        if: steps.download_dbt_manifest.outcome == 'success'
+        id: run_dbt
+        run: dbt run -m state:modified+ --state . --target prod
+
+      # Test delta models
+      - name: Test delta models
+        if: steps.download_dbt_manifest.outcome == 'success'
+        run: dbt test --target prod -m state:modified+ --state .
+
+      - name: Upload dbt manifest prod
+        uses: actions/upload-artifact@v2
+        with:
+            name: {% raw %}"${{ env.ARTIFACT_DBT_MANIFEST_NAME_PROD }}"{% endraw %}
+            path: target/manifest.json
+            if-no-files-found: error
+
+      # Compile & upload state for dev
+{%- if cookiecutter.adapter == "bigquery" %}
+      - name: Create Google Service Account key file from secret DEV
+        run: 'echo "$KEYFILE" | base64 -d > service_account-dev.json'
+        shell: bash
+        env:
+          KEYFILE: {% raw %}"${{ secrets.BIGQUERY_SA_KEYFILE_DEV }}"{% endraw %}
+{%- endif %}
+
+      - name: Compile state for dev
+        run: dbt compile --target dev
+      
+      - name: Upload dbt manifest dev
+        uses: actions/upload-artifact@v2
+        with:
+            name: {% raw %}"${{ env.ARTIFACT_DBT_MANIFEST_NAME_DEV }}"{% endraw %}
+            path: target/manifest.json
+            if-no-files-found: error

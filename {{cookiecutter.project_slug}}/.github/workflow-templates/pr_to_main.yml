@@ -1,0 +1,141 @@
+# Template for Github Action workflow pr_to_main
+#
+# Workflow tasks:
+#   - Lint SQL files
+#   - Check required tests
+#   - Run delta models
+#   - Test delta models
+#
+# Usage:
+#   - Set Github Secrets:
+{%- if cookiecutter.adapter == 'bigquery' %}
+#     - DBT_BIGQUERY_KEYFILE_DEV: JSON key of Google service account (dev)
+#     - DBT_BIGQUERY_PROJECT_DEV: BigQuery project
+{%- elif cookiecutter.adapter == 'snowflake' %}
+#     - DBT_SNOWFLAKE_ACCOUNT: Snowflake account
+#     - DBT_SNOWFLAKE_USER: Snowflake user
+#     - DBT_SNOWFLAKE_PASSWORD: Snowflake password
+#     - DBT_SNOWFLAKE_ROLE: Snowflake role for dbt
+#     - DBT_SNOWFLAKE_WAREHOUSE: Snowflake warehouse for dbt
+#     - DBT_SNOWFLAKE_DATABASE_DEV: Snowflake database (dev)
+#     - DBT_SNOWFLAKE_SCHEMA_DEV: Snowflake schema (dev)
+{%- endif %}
+
+name: pr_to_main
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+     - 'models/**'
+      - 'snapshots/**'
+      - 'dbt_project.yml'
+      - 'packages.yml'
+      - 'requirements.txt'
+      - '.github/workflows/**'
+
+concurrency: staging
+
+env:
+  ARTIFACT_DBT_MANIFEST_WORKFLOW: push_to_main.yml
+  ARTIFACT_DBT_MANIFEST_NAME: dbt_manifest_dev
+
+  DBT_PROFILES_DIR: ./
+
+{%- if cookiecutter.adapter == "bigquery" %}
+  # Environment variables for running Dbt on BigQuery
+  DBT_BIGQUERY_PROJECT_DEV: {% raw %}{{ secrets.DBT_BIGQUERY_PROJECT_DEV }}{% endraw %}
+  DBT_BIGQUERY_DATASET_DEV: github_action
+  # DBT_BIGQUERY_LOCATION: {{ cookiecutter.location }}
+{%- elif cookiecutter.adapter == "snowflake" %}
+  # Environment variables for running Dbt on Snowflake
+  DBT_SNOWFLAKE_ACCOUNT: {% raw %}{{ env_var("DBT_SNOWFLAKE_ACCOUNT") }}{% endraw %}
+  DBT_SNOWFLAKE_USER: {% raw %}{{ env_var("DBT_SNOWFLAKE_USER") }}{% endraw %}
+  DBT_SNOWFLAKE_PASSWORD: {% raw %}{{ env_var('DBT_SNOWFLAKE_PASSWORD') }}{% endraw %}
+  DBT_SNOWFLAKE_ROLE: {% raw %}{{ env_var("DBT_SNOWFLAKE_ROLE") }}{% endraw %}
+  DBT_SNOWFLAKE_WAREHOUSE: {% raw %}{{ env_var("DBT_SNOWFLAKE_WAREHOUSE") }}{% endraw %}
+  DBT_SNOWFLAKE_DATABASE_DEV: {% raw %}{{ env_var("DBT_SNOWFLAKE_DATABASE_DEV") }}{% endraw %}
+  DBT_SNOWFLAKE_SCHEMA_DEV: github_action
+{%- endif %}
+
+jobs:
+  pr_to_main:
+    name: pr_to_main
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v2
+
+      - uses: actions/setup-python@v1
+        with:
+          python-version: "3.7.x"
+
+{%- if cookiecutter.adapter == "bigquery" %}
+      ## Dbt - Google BigQuery
+      - name: Create Google Service Account key file from secret
+        run: 'echo "$KEYFILE" > service_account-dev.json'
+        shell: bash
+        env:
+          KEYFILE: {% raw %}"${{ secrets.DBT_BIGQUERY_KEYFILE_DEV }}"{% endraw %}
+{%- endif %}
+
+      ## Cache Pip wheel files
+      - name: Cache Pip
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: {% raw %}"${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}"{% endraw %}
+
+      ## Install Python dependencies & Dbt packages
+      - name: Install dependencies
+        run: |
+          pip3 install -r requirements.txt
+          dbt deps
+          dbt seed
+
+      ## Lint model files
+      - name: Lint with sqlfluff
+        run: |
+          git fetch origin main:main
+          git diff main --name-only --diff-filter=d | egrep '^models/.*sql$$' | xargs -r sqlfluff lint
+
+      ## Check required dbt tests
+      - name: Check required tests
+        run: |
+          dbt run-operation required_tests
+
+      ## Download dbt manifest uploaded in another workflow (default: push_to_main.yml).
+      # This manifest file will be used to filter out delta models.
+      - name: Download dbt manifest
+        id: download_dbt_manifest
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          workflow: {% raw %}"${{ env.WORKFLOW_DBT_MANIFEST }}"{% endraw %}
+          workflow_conclusion: success
+          branch: main
+          name: {% raw %}"${{ env.ARTIFACT_DBT_MANIFEST_NAME }}"{% endraw %}
+          path: .
+          check_artifacts:  false
+        continue-on-error: true
+
+      ## In some case, manifest file artifact cannot be downloaded.
+      # Then, compile current code to create a new manifest file.
+      # Note, because previous dbt state is missing, all models will be
+      # run and tested.
+      - name: Create new Dbt manifest if cannot download
+        if: steps.download_dbt_manifest.outcome == 'failure'
+        run: |
+          dbt compile
+          cp target/manifest.json .
+
+      ## Run delta models
+      - name: Run models
+        id: run_dbt
+        run: dbt run -m state:modified+ --state .
+
+      ## Test delta models
+      - name: Test models
+        run: dbt test -m state:modified+ --state .

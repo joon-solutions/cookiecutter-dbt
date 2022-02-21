@@ -1,0 +1,14 @@
+{
+    "name": "Check Pull Request Workflow",
+    "description": "Template of workflow to check every PR made to the default branch.",
+    "iconName": "example-icon",
+    "categories": [
+        "SQL", "Python"
+    ],
+    "filePatterns": [
+        "packages.yml",
+        "dbt_project.yml",
+        "profiles.yml",
+        "requirements.txt"
+    ]
+}

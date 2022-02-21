@@ -1,0 +1,14 @@
+{
+    "name": "Full refresh Production Workflow",
+    "description": "Template of workflow to refresh Production data periodically.",
+    "iconName": "example-icon",
+    "categories": [
+        "SQL", "Python"
+    ],
+    "filePatterns": [
+        "packages.yml",
+        "dbt_project.yml",
+        "profiles.yml",
+        "requirements.txt"
+    ]
+}

@@ -1,0 +1,57 @@
+# Dbt profiles.yml for Github Actions
+
+{{ cookiecutter.project_slug }}:
+  target: dev
+  outputs:
+
+{%- if cookiecutter.adapter == 'bigquery' %}
+    dev:
+      type: bigquery
+      method: service-account
+      project: {% raw %}{{ env_var("DBT_BIGQUERY_PROJECT_DEV") }}{% endraw %}
+      dataset: {% raw %}{{ env_var("DBT_BIGQUERY_DATASET_DEV") }}{% endraw %}
+      location: {% raw %}{{ env_var("DBT_BIGQUERY_LOCATION", "US") }}{% endraw %}
+      keyfile: service_account-dev.json
+      threads: 32
+      timeout_second: 300
+      priority: interactive
+    
+    prod:
+      type: bigquery
+      method: service-account
+      project: {% raw %}{{ env_var("DBT_BIGQUERY_PROJECT_PROD") }}{% endraw %}
+      dataset: {% raw %}{{ env_var("DBT_BIGQUERY_DATASET_PROD") }}{% endraw %}
+      location: {% raw %}{{ env_var("DBT_BIGQUERY_LOCATION") }}{% endraw %}
+      keyfile: service_account-prod.json
+      threads: 32
+      timeout_second: 300
+      priority: interactive
+
+{%- elif cookiecutter.adapter == 'snowflake' %}
+    dev:
+      type: snowflake
+      account: {% raw %}{{ env_var("DBT_SNOWFLAKE_ACCOUNT") }}{% endraw %}
+      user: {% raw %}{{ env_var("DBT_SNOWFLAKE_USER") }}{% endraw %}
+      password: {% raw %}"{{ env_var('DBT_SNOWFLAKE_PASSWORD') }}"{% endraw %}
+      role: {% raw %}{{ env_var("DBT_SNOWFLAKE_ROLE") }}{% endraw %}
+      warehouse: {% raw %}{{ env_var("DBT_SNOWFLAKE_WAREHOUSE") }}{% endraw %}
+      database: {% raw %}{{ env_var("DBT_SNOWFLAKE_DATABASE_DEV") }}{% endraw %}
+      schema: {% raw %}{{ env_var("DBT_SNOWFLAKE_SCHEMA_DEV") }}{% endraw %}
+
+      client_session_keep_alive: False
+      threads: 8
+
+    prod:
+      type: snowflake
+      account: {% raw %}{{ env_var("DBT_SNOWFLAKE_ACCOUNT") }}{% endraw %}
+      user: {% raw %}{{ env_var("DBT_SNOWFLAKE_USER") }}{% endraw %}
+      password: {% raw %}"{{ env_var('DBT_SNOWFLAKE_PASSWORD') }}"{% endraw %}
+      role: {% raw %}{{ env_var("DBT_SNOWFLAKE_ROLE") }}{% endraw %}
+      warehouse: {% raw %}{{ env_var("DBT_SNOWFLAKE_WAREHOUSE") }}{% endraw %}
+      database: {% raw %}{{ env_var("DBT_SNOWFLAKE_DATABASE_PROD") }}{% endraw %}
+      schema: {% raw %}{{ env_var("DBT_SNOWFLAKE_SCHEMA_PROD") }}{% endraw %}
+
+      client_session_keep_alive: False
+      threads: 8
+
+{%- endif %}

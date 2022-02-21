@@ -1,0 +1,14 @@
+{
+    "name": "CI/CD Workflow",
+    "description": "Template of workflow to run dbt models on production on each push to the default branch.",
+    "iconName": "example-icon",
+    "categories": [
+        "SQL", "Python"
+    ],
+    "filePatterns": [
+        "packages.yml",
+        "dbt_project.yml",
+        "profiles.yml",
+        "requirements.txt"
+    ]
+}
