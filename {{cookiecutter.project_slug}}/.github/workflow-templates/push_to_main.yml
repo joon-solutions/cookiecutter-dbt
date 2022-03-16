@@ -103,7 +103,7 @@ jobs:
         uses: dawidd6/action-download-artifact@v2
         with:
           workflow: {% raw %}"${{ github.workflow }}.yml"{% endraw %}
-          workflow_conclusion: success
+          workflow_conclusion: completed
           branch: main
           name: {% raw %}"${{ env.ARTIFACT_DBT_MANIFEST_NAME_PROD }}"{% endraw %}
           path: .
@@ -139,6 +139,7 @@ jobs:
 
       - name: Upload dbt manifest prod
         uses: actions/upload-artifact@v2
+        if: always()
         with:
             name: {% raw %}"${{ env.ARTIFACT_DBT_MANIFEST_NAME_PROD }}"{% endraw %}
             path: target/manifest.json
@@ -147,6 +148,7 @@ jobs:
       # Compile & upload state for dev
 {%- if cookiecutter.adapter == "bigquery" %}
       - name: Create Google Service Account key file from secret DEV
+        if: always()
         run: 'echo "$KEYFILE" | base64 -d > service_account-dev.json'
         shell: bash
         env:
@@ -154,10 +156,12 @@ jobs:
 {%- endif %}
 
       - name: Compile state for dev
+        if: always()
         run: dbt compile --target dev
       
       - name: Upload dbt manifest dev
         uses: actions/upload-artifact@v2
+        if: always()
         with:
             name: {% raw %}"${{ env.ARTIFACT_DBT_MANIFEST_NAME_DEV }}"{% endraw %}
             path: target/manifest.json
